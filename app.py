@@ -292,7 +292,6 @@ tab1, tab2 = st.tabs(["📊 Multi-market comparison", "🔎 Single-market deep d
 # --- Tab 1: Multi-market comparison ---
 with tab1:
     st.subheader("Multi-market comparison")
-    st.text("When property lines <= 5, viz will pop out property details")
 
     default_labels = [
         opt for opt in market_options if any(x in opt for x in ["(12060)", "(31080)"])
@@ -315,6 +314,7 @@ with tab1:
 # --- Tab 2: Single-market deep dive ---
 with tab2:
     st.subheader("Single-market deep dive")
+    st.caption("When property lines <= 5, viz will pop out property details")
 
     selected_labels_2 = st.multiselect(
         "Select one or more markets",

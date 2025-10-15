@@ -1,0 +1,15 @@
+[project]
+name = "market_radius_viz"
+version = "0.1.0"
+description = "Default template for PDM package"
+authors = [
+    {name = "David Huang", email = "david.h@forty5park.com"},
+]
+dependencies = ["streamlit>=1.50.0", "pandas>=2.3.3", "numpy>=2.3.4", "matplotlib>=3.10.7"]
+requires-python = "==3.13.*"
+readme = "README.md"
+license = {text = "MIT"}
+
+
+[tool.pdm]
+distribution = false

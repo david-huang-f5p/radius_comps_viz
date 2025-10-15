@@ -1,9 +1,10 @@
-import os
 import math
+import os
 import re
-import pandas as pd
-import numpy as np
+
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import streamlit as st
 
 # ======================
@@ -23,17 +24,20 @@ FIG_W, FIG_H = 10, 8  # <-- Adjust these to make plots bigger/smaller
 st.set_page_config(page_title="Radius Experiments", layout="wide")
 
 st.title("Radius Comps Explorer")
-st.caption("Two tabs: multi-market comparison and single-market deep dive. \n\n Each market chooses random 30 properties")
-
+st.caption(
+    "Two tabs: multi-market comparison and single-market deep dive. \n\n Each market chooses random 30 properties"
+)
 # ======================
 # Helpers
 # ======================
+
 
 def pick_first_existing(*paths):
     for p in paths:
         if p and os.path.exists(p):
             return p
     return None
+
 
 @st.cache_data(show_spinner=False)
 def load_csv(path: str) -> pd.DataFrame:
@@ -48,10 +52,22 @@ def safe_to_int(x):
 
 
 def build_market_options(df: pd.DataFrame, market_map: pd.DataFrame):
-    name_by_id = dict(zip(market_map["census_cbsa_geoid"], market_map["census_cbsa_name"]))
-    market_ids = sorted({safe_to_int(x) for x in df["market_id"].unique() if not pd.isna(x)})
-    options = [f"{name_by_id.get(mid, 'Unknown')} ({mid})" for mid in market_ids if not math.isnan(mid)]
-    label_to_id = {f"{name_by_id.get(mid, 'Unknown')} ({mid})": int(mid) for mid in market_ids if not math.isnan(mid)}
+    name_by_id = dict(
+        zip(market_map["census_cbsa_geoid"], market_map["census_cbsa_name"])
+    )
+    market_ids = sorted(
+        {safe_to_int(x) for x in df["market_id"].unique() if not pd.isna(x)}
+    )
+    options = [
+        f"{name_by_id.get(mid, 'Unknown')} ({mid})"
+        for mid in market_ids
+        if not math.isnan(mid)
+    ]
+    label_to_id = {
+        f"{name_by_id.get(mid, 'Unknown')} ({mid})": int(mid)
+        for mid in market_ids
+        if not math.isnan(mid)
+    }
     return options, label_to_id, name_by_id
 
 
@@ -70,7 +86,9 @@ def avg_table_by_market_radius(df: pd.DataFrame):
     return out
 
 
-def nearest_rows_to_radius(subset: pd.DataFrame, target_radius: float = 15.0) -> pd.DataFrame:
+def nearest_rows_to_radius(
+    subset: pd.DataFrame, target_radius: float = 15.0
+) -> pd.DataFrame:
     sub = subset.copy()
     sub["radius"] = pd.to_numeric(sub["radius"], errors="coerce")
     sub = sub.dropna(subset=["radius", "property_idx", "comps_len"])
@@ -87,6 +105,7 @@ LAT_RE = re.compile(r"\b(lat|latitude)\b", re.I)
 LON_RE = re.compile(r"\b(lon|lng|longitude)\b", re.I)
 NUM_RE = re.compile(r"[-+]?\d*\.?\d+")
 
+
 def parse_property_detail(text: str) -> dict:
     """Parse strings like
     "lat:42.302786, lon:-83.766568, beds:3, fb:2, hb:0, sf:1853, age:75"
@@ -100,12 +119,12 @@ def parse_property_detail(text: str) -> dict:
     out: dict[str, object] = {}
 
     # Split on commas, then key:value
-    parts = [p for p in text.split(',') if p.strip()]
+    parts = [p for p in text.split(",") if p.strip()]
     for part in parts:
-        if ':' not in part:
+        if ":" not in part:
             continue
-        k, v = part.split(':', 1)
-        key = k.strip().lower().replace(' ', '_')
+        k, v = part.split(":", 1)
+        key = k.strip().lower().replace(" ", "_")
         val = v.strip()
 
         # normalize key aliases
@@ -151,7 +170,13 @@ def plot_avg_lines(avg_tbl: pd.DataFrame, market_ids: list[int], name_by_id: dic
     plt.close()
 
 
-def plot_property_lines(df: pd.DataFrame, m_id: int, market_name: str, n_lines: int, horizontal_line: float | None):
+def plot_property_lines(
+    df: pd.DataFrame,
+    m_id: int,
+    market_name: str,
+    n_lines: int,
+    horizontal_line: float | None,
+):
     subset = df[df["market_id"] == m_id].copy()
     if subset.empty:
         st.info(f"No property data for {market_name} ({m_id}).")
@@ -174,7 +199,9 @@ def plot_property_lines(df: pd.DataFrame, m_id: int, market_name: str, n_lines: 
         if prop_data.empty:
             continue
         if show_detailed_legend:
-            plt.plot(prop_data["radius"], prop_data["comps_len"], alpha=0.85, label=f"{pid}")
+            plt.plot(
+                prop_data["radius"], prop_data["comps_len"], alpha=0.85, label=f"{pid}"
+            )
         else:
             plt.plot(prop_data["radius"], prop_data["comps_len"], alpha=0.75)
 
@@ -201,8 +228,14 @@ def plot_property_lines(df: pd.DataFrame, m_id: int, market_name: str, n_lines: 
         base = chosen[["property_idx"]].reset_index(drop=True)
         cols_order = ["lat", "lon", "beds", "fb", "hb", "sf", "age"]
         if "property_detail" in chosen.columns:
-            parsed_series = chosen["property_detail"].astype(str).apply(parse_property_detail)
-            detail_df = pd.DataFrame(list(parsed_series)) if len(parsed_series) else pd.DataFrame()
+            parsed_series = (
+                chosen["property_detail"].astype(str).apply(parse_property_detail)
+            )
+            detail_df = (
+                pd.DataFrame(list(parsed_series))
+                if len(parsed_series)
+                else pd.DataFrame()
+            )
             if detail_df is not None and not detail_df.empty:
                 # ensure all expected columns exist
                 for c in cols_order:
@@ -217,7 +250,6 @@ def plot_property_lines(df: pd.DataFrame, m_id: int, market_name: str, n_lines: 
             st.dataframe(base, use_container_width=True)
 
 
-
 # ======================
 # Sidebar: data sources (paths only)
 # ======================
@@ -227,8 +259,12 @@ with st.sidebar:
     result_path = pick_first_existing(REL_RESULT_PATH, ABS_RESULT_PATH)
     market_map_path = pick_first_existing(REL_MARKET_MAP_PATH, ABS_MARKET_MAP_PATH)
 
-    result_path = st.text_input("Results CSV path", value=result_path or REL_RESULT_PATH)
-    market_map_path = st.text_input("Market map CSV path", value=market_map_path or REL_MARKET_MAP_PATH)
+    result_path = st.text_input(
+        "Results CSV path", value=result_path or REL_RESULT_PATH
+    )
+    market_map_path = st.text_input(
+        "Market map CSV path", value=market_map_path or REL_MARKET_MAP_PATH
+    )
 
 # ======================
 # Load Data
@@ -256,8 +292,11 @@ tab1, tab2 = st.tabs(["📊 Multi-market comparison", "🔎 Single-market deep d
 # --- Tab 1: Multi-market comparison ---
 with tab1:
     st.subheader("Multi-market comparison")
+    st.text("When property lines <= 5, viz will pop out property details")
 
-    default_labels = [opt for opt in market_options if any(x in opt for x in ["(12060)", "(31080)"])]
+    default_labels = [
+        opt for opt in market_options if any(x in opt for x in ["(12060)", "(31080)"])
+    ]
     selected_labels = st.multiselect(
         "Select markets",
         options=market_options,
@@ -287,7 +326,12 @@ with tab2:
     with colA:
         show_property_plots = st.checkbox("Show property lines", value=True)
     with colB:
-        n_lines = st.number_input("# property lines (smallest @ r≈15, total 30 properties)", min_value=1, value=10, step=1)
+        n_lines = st.number_input(
+            "# property lines (smallest @ r≈15, total 30 properties)",
+            min_value=1,
+            value=10,
+            step=1,
+        )
     with colC:
         hline_value = st.number_input("threshold - len of comps (y)", value=50, step=1)
 

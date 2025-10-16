@@ -466,7 +466,6 @@ with tab2:
     st.caption("These markets have average comps @ radius = 5 miles less than 80.")
 
     # Path to the single merged CSV
-    MERGED_PATH = "/Users/davidhuang/Documents/radius_comps_viz/csv_data/ape_comps/merged_output.csv"
 
     @st.cache_data(show_spinner=False)
     def load_merged_df(path: str) -> pd.DataFrame:

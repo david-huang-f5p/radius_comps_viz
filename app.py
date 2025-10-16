@@ -1,3 +1,4 @@
+import glob
 import math
 import os
 import re
@@ -6,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
+from matplotlib.ticker import PercentFormatter
 
 # ======================
 # Config / Defaults
@@ -344,7 +346,13 @@ avg_tbl = avg_table_by_market_radius(df)
 # Tabs
 # ======================
 
-tab1, tab2 = st.tabs(["📊 Multi-market comparison", "🔎 Single-market deep dive"])
+tab1, tab2, tab3 = st.tabs(
+    [
+        "📊 Multi-market comparison",
+        "🔎 Single-market APE_local vs APE_global",
+        "Single-market comps vs radius",
+    ]
+)
 
 # --- Tab 1: Multi-market comparison ---
 with tab1:
@@ -411,8 +419,8 @@ with tab1:
             "Slope computed via least-squares fit on radii 5, 10, 15, 20 for each selected market."
         )
         st.dataframe(slope_df, use_container_width=True)
-# --- Tab 2: Single-market deep dive ---
-with tab2:
+# --- Tab 3: Single-market deep dive ---
+with tab3:
     st.subheader("Single-market deep dive")
     st.caption("When property lines <= 5, viz will pop out property details")
 
@@ -451,3 +459,263 @@ with tab2:
                 mname = name_by_id.get(mid, "Unknown")
                 st.markdown(f"**{mname} ({mid}) — property lines**")
                 plot_property_lines(df, mid, mname, n_lines, hline_value)
+
+# --- Tab 2: APE vs Radius (folder-driven markets, avg_comps_at_r5 < 80) ---
+with tab2:
+    import glob
+    import os
+
+    import matplotlib.pyplot as plt
+    import pandas as pd
+    from matplotlib.ticker import PercentFormatter
+
+    st.subheader("APE vs Radius (filtered markets)")
+    st.caption("These markets have average comps @ radius = 5 miles less than 80.")
+
+    folder_path = (
+        "/Users/davidhuang/Documents/radius_comps_viz/csv_data/ape_comps/v2-market-avg"
+    )
+
+    # Find all CSV files
+    csv_files = sorted(glob.glob(os.path.join(folder_path, "*.csv")))
+    market_ids_in_folder = [os.path.splitext(os.path.basename(f))[0] for f in csv_files]
+
+    if not market_ids_in_folder:
+        st.warning(f"No CSV files found in: {folder_path}")
+    else:
+
+        def label_for(mid):
+            try:
+                mid_int = int(mid)
+                if "name_by_id" in globals():
+                    return f"{name_by_id.get(mid_int, 'Unknown')} ({mid})"
+            except Exception:
+                pass
+            return str(mid)
+
+        def best_csv_for(mid: str) -> str | None:
+            p_v2 = os.path.join(folder_path, f"{mid}_v2.csv")
+            p_v1 = os.path.join(folder_path, f"{mid}.csv")
+            if os.path.exists(p_v2):
+                return p_v2
+            if os.path.exists(p_v1):
+                return p_v1
+            return None
+
+        label_options = [label_for(mid) for mid in market_ids_in_folder]
+        label_to_mid = {label_for(mid): mid for mid in market_ids_in_folder}
+
+        if st.button("Select all (folder)"):
+            st.session_state.tab3_selected = label_options
+
+        selected_labels_tab3 = st.multiselect(
+            "Select markets (from folder)",
+            options=label_options,
+            default=st.session_state.get("tab3_selected", []),
+            key="tab3_selected",
+            help="Markets detected from CSV files in the folder.",
+        )
+
+        # Toggles
+        show_comps = st.checkbox("Show # of comps (bars)", value=True)
+        show_market_avg_line = st.checkbox(
+            "Show APE Market-Avg (horizontal)", value=True
+        )
+
+        run_tab3 = st.button("Plot APE vs radius (from folder)")
+
+        if run_tab3:
+            if not selected_labels_tab3:
+                st.info("Select at least one market.")
+            else:
+                selected_mids = [label_to_mid[lbl] for lbl in selected_labels_tab3]
+                selected_files = [
+                    f for mid in selected_mids if (f := best_csv_for(mid))
+                ]
+
+                if not selected_files:
+                    st.warning("No matching CSVs found for the selected markets.")
+                else:
+                    df = pd.concat(
+                        [pd.read_csv(f) for f in selected_files], ignore_index=True
+                    )
+
+                    base_required = {
+                        "market_id",
+                        "radius_miles",
+                        "ape_local",
+                        "ape_global",
+                        "num_comps_within_radius",
+                    }
+                    if not base_required.issubset(df.columns):
+                        st.error(
+                            "CSV schema mismatch.\n"
+                            f"Required: {sorted(list(base_required))}\n"
+                            f"Found: {sorted(list(df.columns))}"
+                        )
+                    else:
+                        # Aggregate per market + radius
+                        agg = df.groupby(
+                            ["market_id", "radius_miles"], as_index=False
+                        ).agg(
+                            avg_ape_local=("ape_local", "mean"),
+                            avg_ape_global=("ape_global", "mean"),
+                            avg_num_comps=("num_comps_within_radius", "mean"),
+                        )
+
+                        # Filter markets with avg comps at 5 < 80
+                        comps_r5 = (
+                            agg.query("radius_miles == 5")
+                            .groupby("market_id")["avg_num_comps"]
+                            .mean()
+                            .reset_index()
+                        )
+                        valid_mkts = (
+                            comps_r5.loc[comps_r5["avg_num_comps"] < 80, "market_id"]
+                            .astype(str)
+                            .tolist()
+                        )
+
+                        has_mkt_cols = {"market_avg", "ape_market_avg"}.issubset(
+                            df.columns
+                        )
+                        has_price = "current_listing_price" in df.columns
+
+                        for mid in selected_mids:
+                            if str(mid) not in valid_mkts:
+                                st.caption(f"Skipped {mid}: avg_comps_at_r5 ≥ 80")
+                                continue
+
+                            g = agg[
+                                agg["market_id"].astype(str) == str(mid)
+                            ].sort_values("radius_miles")
+                            if g.empty:
+                                st.caption(f"Skipped {mid}: no data after aggregation.")
+                                continue
+
+                            # Horizontal line values (per-market means over raw rows)
+                            raw_m = df[df["market_id"].astype(str) == str(mid)]
+
+                            # Global APE (mean over all rows)
+                            ape_global_val = None
+                            if not raw_m.empty and "ape_global" in raw_m.columns:
+                                vals = pd.to_numeric(
+                                    raw_m["ape_global"], errors="coerce"
+                                ).dropna()
+                                if len(vals) > 0:
+                                    ape_global_val = float(vals.mean())
+
+                            # Market-Avg APE (robust)
+                            ape_market_val = None
+                            if has_mkt_cols and raw_m["ape_market_avg"].notna().any():
+                                vals = pd.to_numeric(
+                                    raw_m["ape_market_avg"], errors="coerce"
+                                ).dropna()
+                                if len(vals) > 0:
+                                    ape_market_val = float(vals.mean())
+                            elif has_price and "market_avg" in raw_m.columns:
+                                tmp = raw_m[
+                                    ["market_avg", "current_listing_price"]
+                                ].copy()
+                                tmp["market_avg"] = pd.to_numeric(
+                                    tmp["market_avg"], errors="coerce"
+                                )
+                                tmp["current_listing_price"] = pd.to_numeric(
+                                    tmp["current_listing_price"], errors="coerce"
+                                )
+                                tmp = tmp[
+                                    (tmp["current_listing_price"] > 0)
+                                    & tmp["market_avg"].notna()
+                                ]
+                                if len(tmp) > 0:
+                                    ape_vals = (
+                                        tmp["market_avg"] - tmp["current_listing_price"]
+                                    ).abs() / tmp["current_listing_price"].abs()
+                                    ape_vals = (
+                                        pd.to_numeric(ape_vals, errors="coerce")
+                                        .replace(
+                                            [float("inf"), -float("inf")], float("nan")
+                                        )
+                                        .dropna()
+                                    )
+                                    if len(ape_vals) > 0:
+                                        ape_market_val = float(ape_vals.mean())
+
+                            # Market display name
+                            mname = None
+                            try:
+                                if "name_by_id" in globals():
+                                    mname = name_by_id.get(int(mid), None)
+                            except Exception:
+                                pass
+                            title_name = (
+                                f"{mname} ({mid})" if mname else f"Market: {mid}"
+                            )
+
+                            # --- Plot ---
+                            fig, ax1 = plt.subplots(figsize=(7.5, 4.5))
+
+                            # APE Local vs radius (distinct color)
+                            ax1.plot(
+                                g["radius_miles"],
+                                g["avg_ape_local"],
+                                marker="o",
+                                linewidth=2.0,
+                                color="tab:blue",  # distinct color for APE Local
+                                label="APE Local (vs radius)",
+                            )
+
+                            # Horizontal lines (no grid lines / no radius=5 line)
+                            if pd.notna(ape_global_val):
+                                ax1.axhline(
+                                    y=ape_global_val,
+                                    linestyle=(0, (5, 3)),
+                                    linewidth=1.8,
+                                    color="tab:orange",
+                                    label=f"APE Global (μ={ape_global_val:.2%})",
+                                )
+                            if show_market_avg_line and pd.notna(ape_market_val):
+                                ax1.axhline(
+                                    y=ape_market_val,
+                                    linestyle=":",
+                                    linewidth=2.2,
+                                    color="tab:green",
+                                    label=f"APE Market-Avg (μ={ape_market_val:.2%})",
+                                )
+
+                            # Axis formatting
+                            ax1.set_xlabel("Radius (miles)")
+                            ax1.set_ylabel("Average APE")
+                            ax1.yaxis.set_major_formatter(PercentFormatter(xmax=1.0))
+
+                            # Right axis with # of comps as bars (optional)
+                            if show_comps:
+                                ax2 = ax1.twinx()
+                                ax2.bar(
+                                    g["radius_miles"],
+                                    g["avg_num_comps"],
+                                    alpha=0.25,
+                                    width=0.8,
+                                    color="tab:gray",
+                                    label="Avg # of comps",
+                                )
+                                ax2.set_ylabel("Average # of comps")
+                                # Combined legend
+                                lines1, labels1 = ax1.get_legend_handles_labels()
+                                lines2, labels2 = ax2.get_legend_handles_labels()
+                                ax1.legend(
+                                    lines1 + lines2,
+                                    labels1 + labels2,
+                                    bbox_to_anchor=(1.1, 1),
+                                    loc="upper left",
+                                    fontsize=7,
+                                    ncol=1,
+                                    frameon=False,
+                                )
+                            else:
+                                ax1.legend(loc="upper left")
+
+                            plt.title(title_name)
+                            plt.tight_layout()
+                            st.pyplot(fig)
+                            plt.close(fig)

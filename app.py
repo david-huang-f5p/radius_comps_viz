@@ -21,7 +21,7 @@ ABS_MARKET_MAP_PATH = "/Users/davidhuang/Documents/optimus/scripts/radius_experi
 # Global figure size (tune here to control plot size and reduce scrolling)
 FIG_W, FIG_H = 10, 8  # <-- Adjust these to make plots bigger/smaller
 
-st.set_page_config(page_title="Radius Experiments", layout="wide")
+st.set_page_config(page_title="Radius Experiments", layout="centered")
 
 st.title("Radius Comps Explorer")
 st.caption(
@@ -97,7 +97,43 @@ def nearest_rows_to_radius(
     nearest = sub.loc[idxmin].drop(columns=["_absdiff"])
     return nearest
 
-
+def _bin_radius_to_5_20(r: float) -> float | None:
+    """
+    Round radius to nearest multiple of 5 within [5, 20].
+    Returns None if outside that range.
+    """
+    if pd.isna(r):
+        return None
+    r5 = 5 * round(float(r) / 5.0)
+    if 5 <= r5 <= 20:
+        return float(r5)
+    return None
+def make_binned_avg_tbl(avg_tbl: pd.DataFrame) -> pd.DataFrame:
+    """
+    From avg_tbl (market_id, radius, avg_comps_len), keep only radii 5,10,15,20.
+    If multiple rows fall into the same bin, average them.
+    """
+    t = avg_tbl.copy()
+    t["radius_bin"] = t["radius"].apply(_bin_radius_to_5_20)
+    t = t.dropna(subset=["radius_bin"])
+    out = (
+        t.groupby(["market_id", "radius_bin"])["avg_comps_len"]
+        .mean()
+        .reset_index()
+        .rename(columns={"radius_bin": "radius"})
+        .sort_values(["market_id", "radius"])
+    )
+    return out
+def market_slope_5_to_20(binned_avg_tbl: pd.DataFrame, market_id: int) -> float | None:
+    """
+    Compute slope using np.polyfit over binned radii in [5,10,15,20].
+    Returns None if fewer than 2 bins exist for that market.
+    """
+    sub = binned_avg_tbl[binned_avg_tbl["market_id"] == market_id].sort_values("radius")
+    if sub.shape[0] < 2:
+        return None
+    slope, _ = np.polyfit(sub["radius"].values, sub["avg_comps_len"].values, 1)
+    return float(slope)
 # --- Property detail parsing ---
 # Tries to split a free-form detail string into columns, with special handling for lat/lon.
 DETAIL_KV_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_ ]*?)\s*[:=]\s*([^,;|]+)")
@@ -164,9 +200,23 @@ def plot_avg_lines(avg_tbl: pd.DataFrame, market_ids: list[int], name_by_id: dic
     plt.xlabel("Radius")
     plt.ylabel("Average num_comps")
     plt.grid(True)
-    if drew and len(market_ids) > 1:
-        plt.legend()
-    st.pyplot(plt.gcf())
+    # Legend logic:
+    # - If more than 10 markets, suppress legend unless user explicitly enables it
+    # - When shown, place legend outside to avoid covering the plot
+    if drew:
+        too_many = len(market_ids) > 10
+        if show_legend and (not too_many):
+            plt.legend(
+                bbox_to_anchor=(1.05, 1),
+                loc="upper left",
+                fontsize=7,
+                ncol=1,
+                frameon=False,
+            )
+        elif not show_legend or too_many:
+            pass  # no legend
+
+    st.pyplot(plt.gcf(), clear_figure=True)
     plt.close()
 
 
@@ -292,14 +342,20 @@ tab1, tab2 = st.tabs(["📊 Multi-market comparison", "🔎 Single-market deep d
 # --- Tab 1: Multi-market comparison ---
 with tab1:
     st.subheader("Multi-market comparison")
+    # --- Controls: Select all / Clear ---
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        if st.button("Select all"):
+            st.session_state.tab1_selected = list(market_options)
+    with c2:
+        show_legend = st.checkbox("Show legend", value=False, help="Toggle legend display (auto-hidden if too many markets - more than 10)")
 
-    default_labels = [
-        opt for opt in market_options if any(x in opt for x in ["(12060)", "(31080)"])
-    ]
+    # --- Multiselect bound to session_state ---
     selected_labels = st.multiselect(
         "Select markets",
         options=market_options,
-        default=default_labels,
+        default=None,              # default handled by session_state
+        key="tab1_selected",       # bind to session_state
         help="Compare average comps_len vs radius across multiple markets.",
     )
     run = st.button("Plot comparison")
@@ -310,7 +366,20 @@ with tab1:
             st.warning("Select at least one market to compare.")
         else:
             plot_avg_lines(avg_tbl, sel_ids, name_by_id)
+        binned_tbl = make_binned_avg_tbl(avg_tbl)
+        rows = []
+        for mid in sel_ids:
+            slope = market_slope_5_to_20(binned_tbl, mid)
+            rows.append({
+                "market_id": int(mid),
+                "market_name": name_by_id.get(mid, "Unknown"),
+                "slope_r5_to_r20": slope
+            })
 
+        slope_df = pd.DataFrame(rows)
+        st.subheader("Slope table (avg_comps_len vs radius, r=5..20)")
+        st.caption("Slope computed via least-squares fit on radii 5, 10, 15, 20 for each selected market.")
+        st.dataframe(slope_df, use_container_width=True)
 # --- Tab 2: Single-market deep dive ---
 with tab2:
     st.subheader("Single-market deep dive")
@@ -327,13 +396,14 @@ with tab2:
         show_property_plots = st.checkbox("Show property lines", value=True)
     with colB:
         n_lines = st.number_input(
-            "# property lines (smallest @ r≈15, total 30 properties)",
+            "# property lines",
             min_value=1,
             value=10,
             step=1,
+            help="number of property having smallest comps @ r≈15, total 30 properties"
         )
     with colC:
-        hline_value = st.number_input("threshold - len of comps (y)", value=50, step=1)
+        hline_value = st.number_input("threshold line", value=50, step=1, help="number of comps (y)")
 
     if not selected_labels_2:
         st.info("Select at least one market to display.")

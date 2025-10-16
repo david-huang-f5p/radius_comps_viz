@@ -100,26 +100,26 @@ def nearest_rows_to_radius(
     return nearest
 
 
-def _bin_radius_to_5_20(r: float) -> float | None:
+def _bin_radius_to_1_20(r: float) -> float | None:
     """
-    Round radius to nearest multiple of 5 within [5, 20].
+    Round radius to nearest integer within [1, 20].
     Returns None if outside that range.
     """
     if pd.isna(r):
         return None
-    r5 = 5 * round(float(r) / 5.0)
-    if 5 <= r5 <= 20:
-        return float(r5)
+    r1 = round(float(r))
+    if 1 <= r1 <= 20:
+        return float(r1)
     return None
 
 
 def make_binned_avg_tbl(avg_tbl: pd.DataFrame) -> pd.DataFrame:
     """
-    From avg_tbl (market_id, radius, avg_comps_len), keep only radii 5,10,15,20.
+    From avg_tbl (market_id, radius, avg_comps_len), keep only integer radii 1–20.
     If multiple rows fall into the same bin, average them.
     """
     t = avg_tbl.copy()
-    t["radius_bin"] = t["radius"].apply(_bin_radius_to_5_20)
+    t["radius_bin"] = t["radius"].apply(_bin_radius_to_1_20)
     t = t.dropna(subset=["radius_bin"])
     out = (
         t.groupby(["market_id", "radius_bin"])["avg_comps_len"]
@@ -131,16 +131,20 @@ def make_binned_avg_tbl(avg_tbl: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def market_slope_5_to_20(binned_avg_tbl: pd.DataFrame, market_id: int) -> float | None:
+def market_slope_1_to_20(tbl: pd.DataFrame, market_id: int) -> float | None:
     """
-    Compute slope using np.polyfit over binned radii in [5,10,15,20].
-    Returns None if fewer than 2 bins exist for that market.
+    Compute slope of avg_comps_len vs radius (1–20) for a given market_id
+    using least-squares linear regression.
     """
-    sub = binned_avg_tbl[binned_avg_tbl["market_id"] == market_id].sort_values("radius")
-    if sub.shape[0] < 2:
+    df = tbl.query("market_id == @market_id and 1 <= radius <= 20")
+    if df.empty:
         return None
-    slope, _ = np.polyfit(sub["radius"].values, sub["avg_comps_len"].values, 1)
-    return float(slope)
+    x = df["radius"].values
+    y = df["avg_comps_len"].values
+    if len(x) < 2:
+        return None
+    slope = np.polyfit(x, y, 1)[0]
+    return slope
 
 
 # --- Property detail parsing ---
@@ -388,7 +392,7 @@ with tab1:
         binned_tbl = make_binned_avg_tbl(avg_tbl)
         rows = []
         for mid in sel_ids:
-            slope = market_slope_5_to_20(binned_tbl, mid)
+            slope = market_slope_1_to_20(binned_tbl, mid)
             avg_r5 = (
                 binned_tbl.query("market_id == @mid and radius == 5")[
                     "avg_comps_len"
@@ -407,7 +411,7 @@ with tab1:
                 {
                     "market_id": int(mid),
                     "market_name": name_by_id.get(mid, "Unknown"),
-                    "slope_r5_to_r20": slope,
+                    "slope_r1_to_r20": slope,
                     "avg_comps_at_r5": avg_r5,
                     "avg_comps_at_r20": avg_r20,
                 }

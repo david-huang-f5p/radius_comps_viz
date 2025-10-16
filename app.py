@@ -15,6 +15,7 @@ from matplotlib.ticker import PercentFormatter
 # Updated relative data paths
 REL_RESULT_PATH = "csv_data/_radius_results_ALL_markets_100properties.csv"
 REL_MARKET_MAP_PATH = "csv_data/F5P Active Markets.csv"
+REL_APE_PATH = "csv_data/ape_comps/v2-market-avg"
 
 # Optional absolute fallbacks (kept in case someone launches outside repo root)
 ABS_RESULT_PATH = "/Users/davidhuang/Documents/optimus/scripts/radius_experiment/_radius_results/_radius_results_ALL_markets.csv"
@@ -472,9 +473,7 @@ with tab2:
     st.subheader("APE vs Radius (filtered markets)")
     st.caption("These markets have average comps @ radius = 5 miles less than 80.")
 
-    folder_path = (
-        "/Users/davidhuang/Documents/radius_comps_viz/csv_data/ape_comps/v2-market-avg"
-    )
+    folder_path = REL_APE_PATH
 
     # Find all CSV files
     csv_files = sorted(glob.glob(os.path.join(folder_path, "*.csv")))

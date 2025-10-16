@@ -11,7 +11,7 @@ import streamlit as st
 # Config / Defaults
 # ======================
 # Updated relative data paths
-REL_RESULT_PATH = "csv_data/_radius_results_ALL_markets.csv"
+REL_RESULT_PATH = "csv_data/_radius_results_ALL_markets_100properties.csv"
 REL_MARKET_MAP_PATH = "csv_data/F5P Active Markets.csv"
 
 # Optional absolute fallbacks (kept in case someone launches outside repo root)
@@ -25,7 +25,7 @@ st.set_page_config(page_title="Radius Experiments", layout="centered")
 
 st.title("Radius Comps Explorer")
 st.caption(
-    "Two tabs: multi-market comparison and single-market deep dive. \n\n Each market chooses random 30 properties"
+    "Two tabs: multi-market comparison and single-market deep dive. \n\n Each market chooses random 100 properties"
 )
 # ======================
 # Helpers
@@ -97,6 +97,7 @@ def nearest_rows_to_radius(
     nearest = sub.loc[idxmin].drop(columns=["_absdiff"])
     return nearest
 
+
 def _bin_radius_to_5_20(r: float) -> float | None:
     """
     Round radius to nearest multiple of 5 within [5, 20].
@@ -108,6 +109,8 @@ def _bin_radius_to_5_20(r: float) -> float | None:
     if 5 <= r5 <= 20:
         return float(r5)
     return None
+
+
 def make_binned_avg_tbl(avg_tbl: pd.DataFrame) -> pd.DataFrame:
     """
     From avg_tbl (market_id, radius, avg_comps_len), keep only radii 5,10,15,20.
@@ -124,6 +127,8 @@ def make_binned_avg_tbl(avg_tbl: pd.DataFrame) -> pd.DataFrame:
         .sort_values(["market_id", "radius"])
     )
     return out
+
+
 def market_slope_5_to_20(binned_avg_tbl: pd.DataFrame, market_id: int) -> float | None:
     """
     Compute slope using np.polyfit over binned radii in [5,10,15,20].
@@ -134,6 +139,8 @@ def market_slope_5_to_20(binned_avg_tbl: pd.DataFrame, market_id: int) -> float 
         return None
     slope, _ = np.polyfit(sub["radius"].values, sub["avg_comps_len"].values, 1)
     return float(slope)
+
+
 # --- Property detail parsing ---
 # Tries to split a free-form detail string into columns, with special handling for lat/lon.
 DETAIL_KV_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_ ]*?)\s*[:=]\s*([^,;|]+)")
@@ -348,14 +355,18 @@ with tab1:
         if st.button("Select all"):
             st.session_state.tab1_selected = list(market_options)
     with c2:
-        show_legend = st.checkbox("Show legend", value=False, help="Toggle legend display (auto-hidden if too many markets - more than 10)")
+        show_legend = st.checkbox(
+            "Show legend",
+            value=False,
+            help="Toggle legend display (auto-hidden if too many markets - more than 10)",
+        )
 
     # --- Multiselect bound to session_state ---
     selected_labels = st.multiselect(
         "Select markets",
         options=market_options,
-        default=None,              # default handled by session_state
-        key="tab1_selected",       # bind to session_state
+        default=None,  # default handled by session_state
+        key="tab1_selected",  # bind to session_state
         help="Compare average comps_len vs radius across multiple markets.",
     )
     run = st.button("Plot comparison")
@@ -370,15 +381,35 @@ with tab1:
         rows = []
         for mid in sel_ids:
             slope = market_slope_5_to_20(binned_tbl, mid)
-            rows.append({
-                "market_id": int(mid),
-                "market_name": name_by_id.get(mid, "Unknown"),
-                "slope_r5_to_r20": slope
-            })
+            avg_r5 = (
+                binned_tbl.query("market_id == @mid and radius == 5")[
+                    "avg_comps_len"
+                ].mean()
+                if not binned_tbl.query("market_id == @mid and radius == 5").empty
+                else None
+            )
+            avg_r20 = (
+                binned_tbl.query("market_id == @mid and radius == 20")[
+                    "avg_comps_len"
+                ].mean()
+                if not binned_tbl.query("market_id == @mid and radius == 20").empty
+                else None
+            )
+            rows.append(
+                {
+                    "market_id": int(mid),
+                    "market_name": name_by_id.get(mid, "Unknown"),
+                    "slope_r5_to_r20": slope,
+                    "avg_comps_at_r5": avg_r5,
+                    "avg_comps_at_r20": avg_r20,
+                }
+            )
 
         slope_df = pd.DataFrame(rows)
         st.subheader("Slope table (avg_comps_len vs radius, r=5..20)")
-        st.caption("Slope computed via least-squares fit on radii 5, 10, 15, 20 for each selected market.")
+        st.caption(
+            "Slope computed via least-squares fit on radii 5, 10, 15, 20 for each selected market."
+        )
         st.dataframe(slope_df, use_container_width=True)
 # --- Tab 2: Single-market deep dive ---
 with tab2:
@@ -400,10 +431,12 @@ with tab2:
             min_value=1,
             value=10,
             step=1,
-            help="number of property having smallest comps @ r≈15, total 30 properties"
+            help="number of property having smallest comps @ r≈15, total 100 properties",
         )
     with colC:
-        hline_value = st.number_input("threshold line", value=50, step=1, help="number of comps (y)")
+        hline_value = st.number_input(
+            "threshold line", value=50, step=1, help="number of comps (y)"
+        )
 
     if not selected_labels_2:
         st.info("Select at least one market to display.")

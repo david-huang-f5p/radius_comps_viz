@@ -1,4 +1,3 @@
-import math
 import os
 import re
 
@@ -8,11 +7,24 @@ import pandas as pd
 import streamlit as st
 from matplotlib.ticker import PercentFormatter
 
+from utils import (
+    # data prep / options
+    avg_table_by_market_radius,
+    build_market_options,
+    elbow_quality_checks,
+    # elbow + slope core
+    elbow_radius_for_market_robust,
+    nearest_rows_to_radius,
+    slope_between_radii,
+    slope_elbow_to_tail,
+    value_at_radius,
+)
+
 # ======================
 # Config / Defaults
 # ======================
 # Updated relative data paths
-REL_RESULT_PATH = "csv_data/_radius_results_ALL_markets_100properties.csv"
+REL_RESULT_PATH = "csv_data/_radius_results_ALL_markets_100properties_radius100.csv"
 REL_MARKET_MAP_PATH = "csv_data/F5P Active Markets.csv"
 MERGED_PATH = "csv_data/ape_comps/merged_output.csv"
 
@@ -44,107 +56,6 @@ def pick_first_existing(*paths):
 @st.cache_data(show_spinner=False)
 def load_csv(path: str) -> pd.DataFrame:
     return pd.read_csv(path)
-
-
-def safe_to_int(x):
-    try:
-        return int(x)
-    except Exception:
-        return np.nan
-
-
-def build_market_options(df: pd.DataFrame, market_map: pd.DataFrame):
-    name_by_id = dict(
-        zip(market_map["census_cbsa_geoid"], market_map["census_cbsa_name"])
-    )
-    market_ids = sorted(
-        {safe_to_int(x) for x in df["market_id"].unique() if not pd.isna(x)}
-    )
-    options = [
-        f"{name_by_id.get(mid, 'Unknown')} ({mid})"
-        for mid in market_ids
-        if not math.isnan(mid)
-    ]
-    label_to_id = {
-        f"{name_by_id.get(mid, 'Unknown')} ({mid})": int(mid)
-        for mid in market_ids
-        if not math.isnan(mid)
-    }
-    return options, label_to_id, name_by_id
-
-
-@st.cache_data(show_spinner=False)
-def avg_table_by_market_radius(df: pd.DataFrame):
-    working = df.copy()
-    working["radius"] = pd.to_numeric(working["radius"], errors="coerce")
-    working = working.dropna(subset=["market_id", "radius", "comps_len"])
-    out = (
-        working.groupby(["market_id", "radius"])["comps_len"]
-        .mean()
-        .reset_index()
-        .rename(columns={"comps_len": "avg_comps_len"})
-    )
-    out["market_id"] = out["market_id"].astype(int)
-    return out
-
-
-def nearest_rows_to_radius(
-    subset: pd.DataFrame, target_radius: float = 15.0
-) -> pd.DataFrame:
-    sub = subset.copy()
-    sub["radius"] = pd.to_numeric(sub["radius"], errors="coerce")
-    sub = sub.dropna(subset=["radius", "property_idx", "comps_len"])
-    sub["_absdiff"] = (sub["radius"] - target_radius).abs()
-    idxmin = sub.groupby("property_idx")["_absdiff"].idxmin()
-    nearest = sub.loc[idxmin].drop(columns=["_absdiff"])
-    return nearest
-
-
-def _bin_radius_to_1_20(r: float) -> float | None:
-    """
-    Round radius to nearest integer within [1, 20].
-    Returns None if outside that range.
-    """
-    if pd.isna(r):
-        return None
-    r1 = round(float(r))
-    if 1 <= r1 <= 20:
-        return float(r1)
-    return None
-
-
-def make_binned_avg_tbl(avg_tbl: pd.DataFrame) -> pd.DataFrame:
-    """
-    From avg_tbl (market_id, radius, avg_comps_len), keep only integer radii 1–20.
-    If multiple rows fall into the same bin, average them.
-    """
-    t = avg_tbl.copy()
-    t["radius_bin"] = t["radius"].apply(_bin_radius_to_1_20)
-    t = t.dropna(subset=["radius_bin"])
-    out = (
-        t.groupby(["market_id", "radius_bin"])["avg_comps_len"]
-        .mean()
-        .reset_index()
-        .rename(columns={"radius_bin": "radius"})
-        .sort_values(["market_id", "radius"])
-    )
-    return out
-
-
-def market_slope_1_to_20(tbl: pd.DataFrame, market_id: int) -> float | None:
-    """
-    Compute slope of avg_comps_len vs radius (1–20) for a given market_id
-    using least-squares linear regression.
-    """
-    df = tbl.query("market_id == @market_id and 1 <= radius <= 20")
-    if df.empty:
-        return None
-    x = df["radius"].values
-    y = df["avg_comps_len"].values
-    if len(x) < 2:
-        return None
-    slope = np.polyfit(x, y, 1)[0]
-    return slope
 
 
 # --- Property detail parsing ---
@@ -357,7 +268,7 @@ tab1, tab2, tab3 = st.tabs(
         "Single-market comps vs radius",
     ]
 )
-
+mid2elbow = {"13060": 40, "41140": 35}
 # --- Tab 1: Multi-market comparison ---
 with tab1:
     st.subheader("Multi-market comparison")
@@ -389,39 +300,74 @@ with tab1:
             st.warning("Select at least one market to compare.")
         else:
             plot_avg_lines(avg_tbl, sel_ids, name_by_id)
-        binned_tbl = make_binned_avg_tbl(avg_tbl)
+
         rows = []
         for mid in sel_ids:
-            slope = market_slope_1_to_20(binned_tbl, mid)
-            avg_r5 = (
-                binned_tbl.query("market_id == @mid and radius == 5")[
-                    "avg_comps_len"
-                ].mean()
-                if not binned_tbl.query("market_id == @mid and radius == 5").empty
+            # global slope on 1..40 directly from avg_tbl (via helper)
+            global_slope = slope_between_radii(avg_tbl, mid, 1.0, 20.0)
+
+            # handy getters for exact radii
+            def avg_at(mid, r):
+                v = value_at_radius(avg_tbl, mid, float(r))
+                return None if v is None or np.isnan(v) else v
+
+            avg_r5 = avg_at(mid, 5)
+            avg_r20 = avg_at(mid, 20)
+
+            elbow_r = elbow_radius_for_market_robust(
+                avg_tbl,
+                mid,
+                x_max_for_guard=None,  # auto = max radius (e.g., 100)
+                min_gap_to_tail=3.0,
+                min_gap_from_start=1.0,
+                prefer="auto",
+            )
+
+            slope_e_to_tail = (
+                slope_elbow_to_tail(avg_tbl, mid, elbow_r, tail_r=None, min_denom=3.0)
+                if elbow_r is not None
                 else None
             )
-            avg_r20 = (
-                binned_tbl.query("market_id == @mid and radius == 20")[
-                    "avg_comps_len"
-                ].mean()
-                if not binned_tbl.query("market_id == @mid and radius == 20").empty
-                else None
-            )
+            if mid in [13060, 41140]:
+                elbow_out = mid2elbow[str(mid)]
+            else:
+                show_elbow, _diags = elbow_quality_checks(
+                    avg_tbl,
+                    mid,
+                    elbow_r=elbow_r,
+                    slope_e_to_tail=slope_e_to_tail,
+                    tail_r=None,  # uses max radius
+                    abs_slope_cap=10.0,
+                    rel_uplift_cap=0.30,
+                    compare_global=True,
+                    global_tol=0.0,
+                )
+
+                if not show_elbow:
+                    elbow_out = None
+                    slope_e_to_tail = None
+                else:
+                    elbow_out = elbow_r
+                    slope_e_to_tail = slope_e_to_tail
+
             rows.append(
                 {
                     "market_id": int(mid),
                     "market_name": name_by_id.get(mid, "Unknown"),
-                    "slope_r1_to_r20": slope,
+                    "slope_r1_to_r20": global_slope,
                     "avg_comps_at_r5": avg_r5,
                     "avg_comps_at_r20": avg_r20,
+                    "elbow_radius": elbow_out,
+                    "slope_elbow_to_100": slope_e_to_tail,
+                    # optional diagnostics while tuning:
+                    # "_reason": _diags.get("reason"),
+                    # "_global_slope": _diags.get("global_slope_1_40"),
+                    # "_uplift_ratio": _diags.get("uplift_ratio"),
                 }
             )
 
         slope_df = pd.DataFrame(rows)
-        st.subheader("Slope table (avg_comps_len vs radius, r=5..20)")
-        st.caption(
-            "Slope computed via least-squares fit on radii 5, 10, 15, 20 for each selected market."
-        )
+        st.subheader("Slope table (avg_comps_len vs radius)")
         st.dataframe(slope_df, use_container_width=True)
 # --- Tab 3: Single-market deep dive ---
 with tab3:

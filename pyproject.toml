@@ -5,7 +5,7 @@ description = "Default template for PDM package"
 authors = [
     {name = "David Huang", email = "david.h@forty5park.com"},
 ]
-dependencies = ["streamlit>=1.50.0", "pandas>=2.3.3", "numpy>=2.3.4", "matplotlib>=3.10.7"]
+dependencies = ["streamlit>=1.50.0", "pandas>=2.3.3", "numpy>=2.3.4", "matplotlib>=3.10.7", "kneed>=0.8.5"]
 requires-python = "==3.13.*"
 readme = "README.md"
 license = {text = "MIT"}

@@ -26,7 +26,7 @@ from utils import (
 # Updated relative data paths
 REL_RESULT_PATH = "csv_data/_radius_results_ALL_markets_100properties_radius100.csv"
 REL_MARKET_MAP_PATH = "csv_data/F5P Active Markets.csv"
-MERGED_PATH = "csv_data/ape_comps/merged_output.csv"
+MERGED_PATH = "csv_data/ape_comps/merged_output_larger_market_plus_v2.csv"
 
 # Optional absolute fallbacks (kept in case someone launches outside repo root)
 ABS_RESULT_PATH = "/Users/davidhuang/Documents/optimus/scripts/radius_experiment/_radius_results/_radius_results_ALL_markets.csv"
@@ -264,7 +264,7 @@ avg_tbl = avg_table_by_market_radius(df)
 tab1, tab2, tab3 = st.tabs(
     [
         "📊 Multi-market comparison",
-        "🔎 Single-market APE_local vs APE_global",
+        "APEs comparison",
         "Single-market comps vs radius",
     ]
 )
@@ -412,9 +412,16 @@ with tab3:
 
 # --- Tab 2: APE vs Radius (folder-driven markets, avg_comps_at_r5 < 80) ---
 with tab2:
-    st.subheader("APE vs Radius (filtered markets)")
-    st.caption("These markets have average comps @ radius = 5 miles less than 80.")
+    st.subheader("APE vs Radius")
+    st.caption("""
+    **Market sampling**
 
+    - **Definitions:** Small markets have < 80 average comps at a 5-mile radius (22 total); large markets are all others.
+    - **Sampling:** Randomly select 100 properties per market.
+    - **Radius strategy (aim: similar comps per property):**
+        - Small markets: 5–20 miles
+        - Large markets: 1–5 miles
+    """)
     # Path to the single merged CSV
 
     @st.cache_data(show_spinner=False)
@@ -474,11 +481,11 @@ with tab2:
 
             label_options = [label_for(mid) for mid in market_ids_in_file]
 
-            if st.button("Select all (merged)"):
+            if st.button("Select all markets"):
                 st.session_state.tab3_selected = label_options
 
             selected_labels_tab3 = st.multiselect(
-                "Select markets (from merged CSV)",
+                "Select markets",
                 options=label_options,
                 default=st.session_state.get("tab3_selected", []),
                 key="tab3_selected",
@@ -493,7 +500,7 @@ with tab2:
                 "Summary: only selected markets", value=True
             )
 
-            run_tab3 = st.button("Plot APE vs radius (from merged)")
+            run_tab2 = st.button("Plot APE vs radius")
 
             # === Summary table (above plots) ===
             if not df.empty:
@@ -607,7 +614,7 @@ with tab2:
                 )
 
             # === Plots (after summary) ===
-            if run_tab3:
+            if run_tab2:
                 if not selected_labels_tab3:
                     st.info("Select at least one market.")
                 else:
@@ -631,17 +638,17 @@ with tab2:
                     )
 
                     # Markets with avg comps at r=5 < 80
-                    comps_r5 = (
-                        agg.query("radius_miles == 5")
-                        .groupby("market_id")["avg_num_comps"]
-                        .mean()
-                        .reset_index()
-                    )
-                    valid_mkts = set(
-                        comps_r5.loc[comps_r5["avg_num_comps"] < 80, "market_id"]
-                        .astype(str)
-                        .tolist()
-                    )
+                    # comps_r5 = (
+                    #     agg.query("radius_miles == 5")
+                    #     .groupby("market_id")["avg_num_comps"]
+                    #     .mean()
+                    #     .reset_index()
+                    # )
+                    # valid_mkts = set(
+                    #     comps_r5.loc[comps_r5["avg_num_comps"] < 80, "market_id"]
+                    #     .astype(str)
+                    #     .tolist()
+                    # )
 
                     has_mkt_cols = (
                         "ape_market_avg_effective" in df.columns
@@ -652,9 +659,9 @@ with tab2:
                     )  # kept for parity, though effective col should cover us
 
                     for mid in selected_mids:
-                        if str(mid) not in valid_mkts:
-                            st.caption(f"Skipped {mid}: avg_comps_at_r5 ≥ 80")
-                            continue
+                        # if str(mid) not in valid_mkts:
+                        #     st.caption(f"Skipped {mid}: avg_comps_at_r5 ≥ 80")
+                        #     continue
 
                         g = agg[agg["market_id"].astype(str) == str(mid)].sort_values(
                             "radius_miles"

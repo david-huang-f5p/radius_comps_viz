@@ -268,7 +268,17 @@ tab1, tab2, tab3 = st.tabs(
         "Single-market comps vs radius",
     ]
 )
-mid2elbow = {"13060": 40, "41140": 35}
+mid2elbow = {
+    "13060": 40,
+    "41140": 35,
+    "19100": 60,
+    "20900": 25,
+    "26420": 60,
+    "33100": 80,
+    "35620": 100,
+    "40140": 80,
+    "47900": 60,
+}
 # --- Tab 1: Multi-market comparison ---
 with tab1:
     st.subheader("Multi-market comparison")
@@ -305,6 +315,7 @@ with tab1:
         for mid in sel_ids:
             # global slope on 1..40 directly from avg_tbl (via helper)
             global_slope = slope_between_radii(avg_tbl, mid, 1.0, 20.0)
+            global_slope1 = slope_between_radii(avg_tbl, mid, 5.0, 20.0)
 
             # handy getters for exact radii
             def avg_at(mid, r):
@@ -328,7 +339,7 @@ with tab1:
                 if elbow_r is not None
                 else None
             )
-            if mid in [13060, 41140]:
+            if mid in list([int(key) for key in mid2elbow.keys()]):
                 elbow_out = mid2elbow[str(mid)]
             else:
                 show_elbow, _diags = elbow_quality_checks(
@@ -355,6 +366,7 @@ with tab1:
                     "market_id": int(mid),
                     "market_name": name_by_id.get(mid, "Unknown"),
                     "slope_r1_to_r20": global_slope,
+                    # "slope_r5_to_r20": global_slope1,
                     "avg_comps_at_r5": avg_r5,
                     "avg_comps_at_r20": avg_r20,
                     "elbow_radius": elbow_out,

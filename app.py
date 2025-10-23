@@ -27,7 +27,7 @@ from utils import (
 REL_RESULT_PATH = "csv_data/_radius_results_ALL_markets_100properties_radius100.csv"
 REL_MARKET_MAP_PATH = "csv_data/F5P Active Markets.csv"
 MERGED_PATH = "csv_data/ape_comps/merged_output_larger_market_plus_v2.csv"
-
+REL_SEGMENT_ANALYSIS_DIR = "csv_data/segment_analysis"
 # Optional absolute fallbacks (kept in case someone launches outside repo root)
 ABS_RESULT_PATH = "/Users/davidhuang/Documents/optimus/scripts/radius_experiment/_radius_results/_radius_results_ALL_markets.csv"
 ABS_MARKET_MAP_PATH = "/Users/davidhuang/Documents/optimus/scripts/radius_experiment/F5P Active Markets.csv"
@@ -37,10 +37,8 @@ FIG_W, FIG_H = 10, 8  # <-- Adjust these to make plots bigger/smaller
 
 st.set_page_config(page_title="Radius Experiments", layout="centered")
 
-st.title("Radius Comps Explorer")
-st.caption(
-    "Two tabs: multi-market comparison and single-market deep dive. \n\n Each market chooses random 100 properties"
-)
+st.title("Dashboard")
+st.caption("The dashboard includes radius and fallback experiment result")
 # ======================
 # Helpers
 # ======================
@@ -265,9 +263,11 @@ tab1, tab2, tab3 = st.tabs(
     [
         "📊 Multi-market comparison",
         "APEs comparison",
-        "Single-market comps vs radius",
+        "Market Segment on market-avg and market-train",
+        # "Single-market comps vs radius",
     ]
 )
+# mid2elbow = {}
 mid2elbow = {
     "13060": 40,
     "41140": 35,
@@ -339,6 +339,11 @@ with tab1:
                 if elbow_r is not None
                 else None
             )
+            slope_r5_to_e = (
+                slope_between_radii(avg_tbl, mid, 5.0, elbow_r)
+                if elbow_r is not None
+                else None
+            )
             if mid in list([int(key) for key in mid2elbow.keys()]):
                 elbow_out = mid2elbow[str(mid)]
             else:
@@ -371,6 +376,7 @@ with tab1:
                     "avg_comps_at_r20": avg_r20,
                     "elbow_radius": elbow_out,
                     "slope_elbow_to_100": slope_e_to_tail,
+                    "slope_r5_to_elbow": slope_r5_to_e,
                     # optional diagnostics while tuning:
                     # "_reason": _diags.get("reason"),
                     # "_global_slope": _diags.get("global_slope_1_40"),
@@ -382,45 +388,45 @@ with tab1:
         st.subheader("Slope table (avg_comps_len vs radius)")
         st.dataframe(slope_df, use_container_width=True)
 # --- Tab 3: Single-market deep dive ---
-with tab3:
-    st.subheader("Single-market deep dive")
-    st.caption("When property lines <= 5, viz will pop out property details")
+# with tab3:
+#     st.subheader("Single-market deep dive")
+#     st.caption("When property lines <= 5, viz will pop out property details")
 
-    selected_labels_2 = st.multiselect(
-        "Select one or more markets",
-        options=market_options,
-        help="Shows one averaged chart for all selected markets; optionally plots property-level lines per market.",
-    )
+#     selected_labels_2 = st.multiselect(
+#         "Select one or more markets",
+#         options=market_options,
+#         help="Shows one averaged chart for all selected markets; optionally plots property-level lines per market.",
+#     )
 
-    colA, colB, colC = st.columns([1, 1, 1])
-    with colA:
-        show_property_plots = st.checkbox("Show property lines", value=True)
-    with colB:
-        n_lines = st.number_input(
-            "# property lines",
-            min_value=1,
-            value=10,
-            step=1,
-            help="number of property having smallest comps @ r≈15, total 100 properties",
-        )
-    with colC:
-        hline_value = st.number_input(
-            "threshold line", value=50, step=1, help="number of comps (y)"
-        )
+#     colA, colB, colC = st.columns([1, 1, 1])
+#     with colA:
+#         show_property_plots = st.checkbox("Show property lines", value=True)
+#     with colB:
+#         n_lines = st.number_input(
+#             "# property lines",
+#             min_value=1,
+#             value=10,
+#             step=1,
+#             help="number of property having smallest comps @ r≈15, total 100 properties",
+#         )
+#     with colC:
+#         hline_value = st.number_input(
+#             "threshold line", value=50, step=1, help="number of comps (y)"
+#         )
 
-    if not selected_labels_2:
-        st.info("Select at least one market to display.")
-    else:
-        sel_ids2 = [label_to_id[lbl] for lbl in selected_labels_2]
-        # 1) Average lines for selected markets
-        plot_avg_lines(avg_tbl, sel_ids2, name_by_id)
+#     if not selected_labels_2:
+#         st.info("Select at least one market to display.")
+#     else:
+#         sel_ids2 = [label_to_id[lbl] for lbl in selected_labels_2]
+#         # 1) Average lines for selected markets
+#         plot_avg_lines(avg_tbl, sel_ids2, name_by_id)
 
-        # 2) Per-market property lines
-        if show_property_plots:
-            for mid in sel_ids2:
-                mname = name_by_id.get(mid, "Unknown")
-                st.markdown(f"**{mname} ({mid}) — property lines**")
-                plot_property_lines(df, mid, mname, n_lines, hline_value)
+#         # 2) Per-market property lines
+#         if show_property_plots:
+#             for mid in sel_ids2:
+#                 mname = name_by_id.get(mid, "Unknown")
+#                 st.markdown(f"**{mname} ({mid}) — property lines**")
+#                 plot_property_lines(df, mid, mname, n_lines, hline_value)
 
 # --- Tab 2: APE vs Radius (folder-driven markets, avg_comps_at_r5 < 80) ---
 with tab2:
@@ -494,13 +500,13 @@ with tab2:
             label_options = [label_for(mid) for mid in market_ids_in_file]
 
             if st.button("Select all markets"):
-                st.session_state.tab3_selected = label_options
+                st.session_state.tab2_selected = label_options
 
             selected_labels_tab3 = st.multiselect(
                 "Select markets",
                 options=label_options,
-                default=st.session_state.get("tab3_selected", []),
-                key="tab3_selected",
+                default=st.session_state.get("tab2_selected", []),
+                key="tab2_selected",
                 help="Markets detected from the merged CSV.",
             )
 
@@ -777,3 +783,91 @@ with tab2:
                         plt.tight_layout()
                         st.pyplot(fig)
                         plt.close(fig)
+
+
+# ---- helpers (minimal, no absolute paths) ----
+@st.cache_data(show_spinner=False)
+def discover_segment_csvs(dir_path: str) -> dict[str, str]:
+    """
+    Return {market_id (last 5 digits as str) : file_path} for cascade_summary_*.csv
+    inside REL_SEGMENT_ANALYSIS_DIR.
+    """
+    m = {}
+    if not os.path.isdir(dir_path):
+        return m
+    for fname in os.listdir(dir_path):
+        if not fname.endswith(".csv"):
+            continue
+        # expect pattern like cascade_summary_11460.csv (market = last 5 digits)
+        r = re.search(r"(\d{5})(?=\.csv$)", fname)
+        if r:
+            m[r.group(1)] = os.path.join(dir_path, fname)
+    return m
+
+
+@st.cache_data(show_spinner=False)
+def _load_segment_csv(path: str) -> pd.DataFrame:
+    return pd.read_csv(path)
+
+
+def _label_for_mid(mid_str: str, name_by_id: dict[int, str]) -> str:
+    try:
+        mid_int = int(mid_str)
+        return f"{name_by_id.get(mid_int, 'Unknown')} ({mid_int})"
+    except Exception:
+        return f"Unknown ({mid_str})"
+
+
+# ---- Tab 3: show tables for selected markets from /segment_analysis ----
+# ---- Tab 3: show tables for selected markets from /segment_analysis ----
+with tab3:
+    st.subheader("Market segment comparison")
+    st.caption(
+        "Segments include low, mid, and lux. The table shows properties that triggered fallback "
+        "(either market-avg or market-train). Since six algorithms handle segmentation, a cascade rule applies: "
+        "if KL falls back, use it; else if IJ falls back, use it; else use GH. "
+        "This avoids duplicate comparisons because when KL falls back, IJ and GH also do. "
+        "The APE values are then grouped by category to show fallback performance across segments."
+    )
+
+    # discover files once
+    mid_to_path = discover_segment_csvs(REL_SEGMENT_ANALYSIS_DIR)
+    if not mid_to_path:
+        st.info(f"No segment files found in `{REL_SEGMENT_ANALYSIS_DIR}`.")
+    else:
+        # build labels using existing name_by_id from your earlier build_market_options()
+        labels = []
+        label_to_mid = {}
+        for mid in sorted(mid_to_path.keys(), key=lambda x: int(x)):
+            lbl = _label_for_mid(mid, name_by_id if "name_by_id" in globals() else {})
+            labels.append(lbl)
+            label_to_mid[lbl] = mid
+
+        # --- Select all / clear controls (unique keys to avoid collisions) ---
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            if st.button("Select all", key="tab3_select_all"):
+                st.session_state.tab3_selected = list(labels)
+
+        # --- Multiselect for markets (unique key) ---
+        selected = st.multiselect(
+            "Select one or more markets",
+            options=labels,
+            key="tab3_selected",
+            help="Shows the cascade summary table(s) for the selected market(s).",
+        )
+
+        # --- Display results ---
+        if not selected:
+            st.info("Select at least one market to show its cascade summary table.")
+        else:
+            for lbl in selected:
+                mid = label_to_mid[lbl]
+                path = mid_to_path.get(mid)
+                if not path or not os.path.exists(path):
+                    st.warning(f"CSV not found for market {mid}.")
+                    continue
+
+                df_seg = _load_segment_csv(path)
+                st.caption(f"Market: **{_label_for_mid(mid, name_by_id)}**")
+                st.dataframe(df_seg, use_container_width=True)

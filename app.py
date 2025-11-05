@@ -259,12 +259,12 @@ avg_tbl = avg_table_by_market_radius(df)
 # Tabs
 # ======================
 
-tab1, tab2, tab3 = st.tabs(
+tab1, tab2, tab3, tab4 = st.tabs(
     [
         "📊 Multi-market comparison",
         "APEs comparison",
         "Market Segment on market-avg and market-train",
-        # "Single-market comps vs radius",
+        "Outliers & Box Plot",  # <--- NEW
     ]
 )
 # mid2elbow = {}
@@ -819,7 +819,6 @@ def _label_for_mid(mid_str: str, name_by_id: dict[int, str]) -> str:
 
 
 # ---- Tab 3: show tables for selected markets from /segment_analysis ----
-# ---- Tab 3: show tables for selected markets from /segment_analysis ----
 with tab3:
     st.subheader("Market segment comparison")
     st.caption(
@@ -871,3 +870,198 @@ with tab3:
                 df_seg = _load_segment_csv(path)
                 st.caption(f"Market: **{_label_for_mid(mid, name_by_id)}**")
                 st.dataframe(df_seg, use_container_width=True)
+
+# ===== Tab 4 helpers / constants =====
+from pathlib import Path
+
+BASE_DATA_DIR = "csv_data/outlier_viz"
+RENT_DIR = Path(BASE_DATA_DIR) / "rent"
+VALUES_DIR = Path(BASE_DATA_DIR) / "values"
+PRICE_COL = "current_listing_price"
+RENT_CLOSE_COL = "rent_close_date"
+SALES_CLOSE_COL = "sales_close_date"
+
+
+@st.cache_data(show_spinner=False)
+def list_market_ids_for(deal_type: str) -> list[int]:
+    """Scan folder and return available market_ids (ints) for a given deal_type."""
+    folder = RENT_DIR if deal_type == "rent" else VALUES_DIR
+    if not folder.exists():
+        return []
+    out = []
+    for p in folder.glob("*.parquet"):
+        try:
+            out.append(int(p.stem))
+        except Exception:
+            pass
+    return sorted(set(out))
+
+
+@st.cache_data(show_spinner=False)
+def load_market_parquet(market_id: int, deal_type: str) -> pd.DataFrame:
+    """Load the full parquet for (market_id, deal_type). No column subsetting."""
+    p = (RENT_DIR if deal_type == "rent" else VALUES_DIR) / f"{int(market_id)}.parquet"
+    if not p.exists():
+        print("qwerwer?")
+        return pd.DataFrame()
+    df = pd.read_parquet(p)
+    # ensure price is numeric
+    if PRICE_COL in df.columns:
+        df[PRICE_COL] = pd.to_numeric(df[PRICE_COL], errors="coerce")
+    return df
+
+
+def iqr_bounds(s: pd.Series) -> tuple[float, float, float, float, float]:
+    """Return q1, q3, lower_bound, upper_bound; clamp lower bound to ≥0 for prices."""
+    s = pd.to_numeric(s, errors="coerce").dropna()
+    if len(s) == 0:
+        return (np.nan, np.nan, np.nan, np.nan, np.nan)
+
+    q1 = np.percentile(s, 25)
+    q2 = np.percentile(s, 50)
+    q3 = np.percentile(s, 75)
+    iqr = q3 - q1
+
+    lower = max(0, q1 - 1.5 * iqr)  # ⬅️ ensure non-negative lower bound
+    upper = q3 + 1.5 * iqr
+    return q1, q2, q3, lower, upper
+
+
+# ---- Tab 4: Outliers & Box Plot ----
+with tab4:
+    st.subheader("Market outliers (IQR) & box plot")
+
+    # Use your already-built options from build_market_options(...)
+    # market_options: list of labels like "Austin (12060)"
+    # label_to_id: dict[label] -> market_id
+    deal_type = st.radio(
+        "Deal type",
+        options=["rent", "value"],
+        horizontal=True,
+        index=0,
+        key="tab4_dealtype",
+    )
+
+    # (optional) only show markets that actually have a parquet file for the chosen deal_type
+    data_dir = RENT_DIR if deal_type == "rent" else VALUES_DIR
+    options_with_data = [
+        lbl
+        for lbl in market_options
+        if (data_dir / f"{int(label_to_id[lbl])}.parquet").exists()
+    ]
+    options = options_with_data if options_with_data else market_options
+    default_label = "Atlanta-Sandy Springs-Alpharetta, GA (12060)"
+    selected_label = st.selectbox(
+        "Select market",
+        index=options.index(default_label) if default_label in options else 0,
+        options=options,
+        key="tab4_market_label",
+    )
+
+    market_id = int(label_to_id[selected_label])
+
+    df_full = load_market_parquet(market_id, deal_type)
+
+    if df_full.empty:
+        st.warning(f"No data for market {market_id} ({deal_type}).")
+        st.stop()
+
+    # Choose the close-date column (only for default columns + info, not required for plot)
+    close_col = RENT_CLOSE_COL if deal_type == "rent" else SALES_CLOSE_COL
+    has_close = close_col in df_full.columns
+
+    # Price sanity
+    if PRICE_COL not in df_full.columns:
+        st.error(f"`{PRICE_COL}` not found in file for market {market_id}.")
+        st.dataframe(df_full.head(), use_container_width=True)
+        st.stop()
+
+    # Compute bounds
+    q1, q2, q3, lower_b, upper_b = iqr_bounds(df_full[PRICE_COL])
+
+    # --- Box Plot ---
+    clean_prices = pd.to_numeric(df_full[PRICE_COL], errors="coerce").dropna()
+    if clean_prices.empty:
+        st.warning("No numeric prices to plot.")
+    else:
+        plt.figure(figsize=(8, 5))
+        plt.boxplot(
+            clean_prices.values,
+            vert=False,
+            patch_artist=True,
+            boxprops=dict(facecolor="lightblue"),
+        )
+        plt.title(f"Box Plot — {PRICE_COL}\nmarket={market_id}, deal_type={deal_type}")
+        plt.xlabel(PRICE_COL)
+        st.pyplot(plt.gcf(), clear_figure=True)
+        plt.close()
+
+    # Show computed stats
+    c1, c2, c3, c4, c5 = st.columns(5)
+
+    def small_metric(col, label, value):
+        col.markdown(
+            f"<div style='font-size:18px; line-height:1.2'><b>{label}</b><br>"
+            f"<span style='font-size:20px;'>{value}</span></div>",
+            unsafe_allow_html=True,
+        )
+
+    small_metric(c1, "Q1 (25%)", f"{q1:,.0f}" if pd.notna(q1) else "n/a")
+    small_metric(c2, "Median", f"{q2:,.0f}" if pd.notna(q2) else "n/a")
+    small_metric(c3, "Q3 (75%)", f"{q3:,.0f}" if pd.notna(q3) else "n/a")
+    small_metric(c4, "Lower bound", f"{lower_b:,.0f}" if pd.notna(lower_b) else "n/a")
+    small_metric(c5, "Upper bound", f"{upper_b:,.0f}" if pd.notna(upper_b) else "n/a")
+
+    # Outliers
+    # lower: price < lower_b ; upper: price > upper_b
+    is_num = pd.to_numeric(df_full[PRICE_COL], errors="coerce")
+    lower_mask = (
+        is_num.lt(lower_b)
+        if pd.notna(lower_b)
+        else pd.Series(False, index=df_full.index)
+    )
+    upper_mask = (
+        is_num.gt(upper_b)
+        if pd.notna(upper_b)
+        else pd.Series(False, index=df_full.index)
+    )
+
+    lower_outliers = df_full[lower_mask].copy()
+    upper_outliers = df_full[upper_mask].copy()
+
+    # Column picker for tables (default some useful columns if present)
+    default_cols = ["street_address", "state", "city", PRICE_COL, "psqft"]
+    # if has_close:
+    #     default_cols.append(close_col)
+    # if "transaction_type" in df_full.columns:
+    #     default_cols.append("transaction_type")
+
+    st.markdown("---")
+    selected_cols = st.multiselect(
+        "Columns to display in outlier tables",
+        options=list(df_full.columns),
+        default=[c for c in default_cols if c in df_full.columns],
+        help="You can include any columns; the price column is useful for context.",
+    )
+
+    # Count outliers
+    num_upper = len(upper_outliers)
+    num_lower = len(lower_outliers)
+
+    # --- Upper outliers ---
+    st.markdown(f"### Upper outliers ({num_upper:,})")
+    if num_upper == 0:
+        st.caption("No upper outliers.")
+    else:
+        show_cols = selected_cols if selected_cols else list(upper_outliers.columns)
+        upper_sorted = upper_outliers.sort_values(PRICE_COL, ascending=False)
+        st.dataframe(upper_sorted[show_cols], use_container_width=True)
+
+    # --- Lower outliers ---
+    st.markdown(f"### Lower outliers ({num_lower:,})")
+    if num_lower == 0:
+        st.caption("No lower outliers.")
+    else:
+        show_cols = selected_cols if selected_cols else list(lower_outliers.columns)
+        lower_sorted = lower_outliers.sort_values(PRICE_COL, ascending=True)
+        st.dataframe(lower_sorted[show_cols], use_container_width=True)

@@ -930,7 +930,7 @@ def iqr_bounds(s: pd.Series) -> tuple[float, float, float, float, float]:
 # ---- Tab 4: Outliers & Box Plot ----
 with tab4:
     st.subheader("Market outliers (IQR) & box plot")
-
+    st.caption("Date range: past 90 days of transactions")
     # Use your already-built options from build_market_options(...)
     # market_options: list of labels like "Austin (12060)"
     # label_to_id: dict[label] -> market_id
@@ -1049,7 +1049,7 @@ with tab4:
     num_lower = len(lower_outliers)
 
     # --- Upper outliers ---
-    st.markdown(f"### Upper outliers ({num_upper:,})")
+    st.markdown(f"### Upper outliers (num: {num_upper:,})")
     if num_upper == 0:
         st.caption("No upper outliers.")
     else:
@@ -1058,7 +1058,7 @@ with tab4:
         st.dataframe(upper_sorted[show_cols], use_container_width=True)
 
     # --- Lower outliers ---
-    st.markdown(f"### Lower outliers ({num_lower:,})")
+    st.markdown(f"### Lower outliers (num: {num_lower:,})")
     if num_lower == 0:
         st.caption("No lower outliers.")
     else:
